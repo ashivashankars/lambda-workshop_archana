@@ -1,63 +1,95 @@
-# Welcome to Serverless!
-#
-# This file is the main config file for your service.
-# It's very minimal at this point and uses default values.
-# You can always add more config options for more control.
-# We've included some commented out config examples here.
-# Just uncomment any of them to get that config option.
-#
-# For full config options, check the docs:
-#    v1.docs.serverless.com
-#
-# Happy Coding!
-
-service: iopipe-workshop-doge-1 # NOTE: update this with your service name
+service: serverless-meme-factory
 
 provider:
   name: aws
-  region: us-east-1
-  runtime: nodejs4.3
-  # iamRoleStatements:
-  #     -  Effect: "Allow"
-  #        Action:
-  #          - "s3:ListBucket"
-  #        Resource: { "Fn::Join" : ["", ["arn:aws:s3:::", { "Ref" : "iopipe-workshop-doge-1"} ] ] }
-  #     -  Effect: "Allow"
-  #        Action:
-  #          - "s3:PutObject"
-  #        Resource:
-  #          Fn::Join:
-  #            - ""
-  #            - - "arn:aws:s3:::"
-  #              - "Ref" : "iopipe-workshop-doge-1"
+  runtime: nodejs18.x # Recommended modern runtime
+  stage: dev
+  region: us-east-1 # Change to your preferred region
 
-#package:
-#  include:
-#   - functions
+  # Environment variables accessible by ALL Lambda functions
+  environment:
+    OUTPUT_BUCKET_NAME: ${self:custom.outputBucketName}
+
+  # IAM Permissions for ALL Lambda functions
+  iam:
+    role:
+      statements:
+        # Permission for Lambda to read from the Input Bucket
+        - Effect: "Allow"
+          Action:
+            - "s3:GetObject"
+          Resource: "arn:aws:s3:::${self:custom.inputBucketName}/*"
+        
+        # Permission for Lambda to write to the Output Bucket
+        - Effect: "Allow"
+          Action:
+            - "s3:PutObject"
+            - "s3:PutObjectAcl" # Optional, but good for common S3 write patterns
+          Resource: "arn:aws:s3:::${self:custom.outputBucketName}/*"
+
+# Define Custom variables (helpful for clean, reusable names)
+custom:
+  # Standard naming convention: service-stage-name
+  inputBucketName: ${self:service}-${self:provider.stage}-input-images
+  outputBucketName: ${self:service}-${self:provider.stage}-processed-memes
 
 functions:
-  create:
-    handler: doge.create
-    memorySize: 128
-    timeout: 30
+  ##########################################
+  # 1. API Gateway HTTP Endpoint Function
+  ##########################################
+  memes:
+    handler: handler.memes # Points to module.exports.memes in handler.js
+    description: A simple HTTP endpoint that returns a random serverless meme phrase.
     events:
       - http:
-          path: doge/create
+          path: memes
           method: get
+          cors: true # Enable CORS for browser access
 
-#   you can add any of the following events
-#   events:
-#     - http:
-#         path: users/create
-#         method: get
-#     - s3: ${bucket}
-#     - schedule: rate(10 minutes)
-#     - sns: greeter-topic
+  ##########################################
+  # 2. S3 Triggered Image Processor Function
+  ##########################################
+  processImage:
+    handler: handler.processImage # Points to module.exports.processImage in handler.js
+    timeout: 30 # Image processing can take a bit longer
+    memorySize: 1024 # Recommended for image processing (more memory = faster)
+    events:
+      - s3:
+          bucket: ${self:custom.inputBucketName}
+          event: s3:ObjectCreated:* # Trigger on new object creation (uploads)
+          existing: true # Use the bucket defined below in the resources block
 
-# you can add CloudFormation resource templates here
+# AWS Resources (like S3 Buckets) defined using CloudFormation
 resources:
   Resources:
-    newResource:
+    # --- Input Bucket (S3 Trigger Source) ---
+    InputBucket:
       Type: AWS::S3::Bucket
       Properties:
-        BucketName: iopipe-workshop-doge-1
+        BucketName: ${self:custom.inputBucketName}
+        # Recommended to block all public access by default
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+
+    # --- Output Bucket (Processed Image Destination) ---
+    OutputBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.outputBucketName}
+        # Add CORS configuration if you intend to access these images directly from a website
+        # CorsConfiguration:
+        #   CorsRules:
+        #     - AllowedHeaders: ['*']
+        #       AllowedMethods: ['GET']
+        #       AllowedOrigins: ['*'] # CAUTION: be more restrictive in production
+        #       MaxAge: 300
+        
+        # Recommended to block all public access by default
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
