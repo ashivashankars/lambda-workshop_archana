@@ -1,0 +1,63 @@
+/* Requires the Docker Pipeline plugin */
+pipeline {
+    // This defines the global execution environment for all stages
+    agent {
+        docker {
+            image 'maven:3.9.11-eclipse-temurin-21-alpine'
+        }
+    }
+
+    environment {
+        DISABLE_AUTH = 'true'
+        DB_ENGINE    = 'sqlite'
+    }
+
+    // All the main build/test/deploy phases go here
+    stages {
+        stage('Build') {
+            steps {
+                sh 'make clean'
+                sh 'make' 
+            }
+        }
+        stage('Test') {
+            steps {
+                sh './gradlew check'
+            }
+        }
+        stage('Deploy') {
+            steps {
+                retry(3) {
+                    sh './flakey-deploy.sh'
+                }
+            }
+        }
+    }
+
+    // Post-build actions run after all stages
+    post {
+       always {
+            // 1. Record Test Results (Chunk 6)
+            junit 'build/reports/**/*.xml'
+            
+            // 2. Archive Build Artifacts (Chunk 6)
+            archiveArtifacts artifacts: 'target/**/*.jar', fingerprint: true
+            
+            // 3. Final Cleanup (Combined from your original second 'always')
+            echo 'Final cleanup.'
+            echo 'One way or another, I have finished'
+        }
+        success {
+            echo 'Deployment successful!'
+        }
+        unstable {
+            echo 'I am unstable :/'
+        }
+        failure {
+            echo 'I failed :('
+        }
+        changed {
+            echo 'Things were different before...'
+        }
+    }
+}
